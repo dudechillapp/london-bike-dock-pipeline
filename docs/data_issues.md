@@ -6,7 +6,7 @@ Newest first. Each issue keeps the query I used, so anyone can check it again.
 | # | Found | Issue | Status |
 | --- | --- | --- | --- |
 | 2 | 22 Oct 2026 | Stray spaces in dock names | Fix planned |
-| 1 | 22 Oct 2026 | Bikes + empty docks don't add up to total docks | Fix planned |
+| 1 | 22 Oct 2026 | Bikes + empty docks don't add up to total docks | Cause likely found, confirming with 24 h of data |
 
 ---
 
@@ -75,8 +75,25 @@ WHERE pulled_at = (SELECT max(pulled_at) FROM staging.dock_status)
 
 **Size of the problem (pull at about 15:00 UTC, 22 Oct 2026):** 648 of 801 docks (81%) had a gap, adding up to 1,597 docking points not counted as either a bike or a free space.
 
-**Open question:** 81% is much higher than I'd expect from broken docking points alone, so there may be a second cause. Next I'll check:
-- whether `NbBikes` equals `NbStandardBikes + NbEBikes`, or leaves some bikes out;
-- whether the same docks show gaps all day (broken hardware) or the gaps move around (something else, such as bikes reserved or being returned).
+**Investigation, 22 Oct 2026** (`python -m src.checks.dock_gaps`, 3 pulls from 14:48 to 15:05 UTC)
 
-I won't use `bikes + empty_docks` as usable capacity until I know which it is.
+81% looked too high for broken hardware alone, so I tested the other explanations first:
+
+| Check | Result | Conclusion |
+| --- | --- | --- |
+| Does `NbBikes` = `NbStandardBikes` + `NbEBikes`? | Equal at all 801 docks | Not the cause: no bikes are left out of the count |
+| Are the gaps at docks flagged `Locked` or not `Installed`? | All 801 docks are installed and unlocked | Not the cause: the flags don't explain it |
+| How big are the gaps? | Mostly 1–3 spaces (524 docks), up to 10 | A few spaces per dock, not whole docks closed |
+| Same docks every pull? | 648 docks had a gap in every pull; 631 of them never changed size | The gaps are fixed |
+| Does the gap move when bikes are hired or returned? | Bikes changed in 486 dock steps, the gap in only 21; correlation -0.10 | No link: hires and returns don't explain it |
+
+**Conclusion so far:** the gaps are fixed per dock and don't move with hires or returns. That fits docking points that are out of service (broken, or holding a bike awaiting repair) far better than anything that changes minute to minute. So the 81% is most likely real: many docks have one or two broken points.
+
+**Limit of this check:** 3 pulls over 17 minutes is a short window. I'll rerun it after 24 hours of data. If gaps still stay fixed through the morning and evening rush, the conclusion holds.
+
+**Decision:** I'll add `broken_docks = total_docks - bikes - empty_docks` in staging and use `bikes + empty_docks` as usable capacity, as planned above, once the 24-hour rerun confirms it.
+
+**Side findings from the same check**
+- 4 docks are flagged `Temporary`. I'll keep a flag for them in `staging.dock`.
+- Every dock still has a `RemovalDate` field, and at least one holds a date in 2018 even though the dock is installed. I won't rely on that field.
+- More names with a stray space before the comma turned up (`Gower Place , Euston`, `Soho Square , Soho`), which supports issue 2.
