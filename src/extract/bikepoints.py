@@ -8,8 +8,10 @@ Run from the project folder:
 import json
 import logging
 import os
+import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import psycopg
 import requests
@@ -20,7 +22,15 @@ load_dotenv()  # reads DB settings and the optional TfL key from .env
 URL = "https://api.tfl.gov.uk/BikePoint"
 MIN_EXPECTED_DOCKS = 500  # London has about 800; far fewer means a broken response
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+# Log to logs/collector.log (kept out of Git) and to the screen when there is one.
+# Task Scheduler runs this with pythonw, which has no screen, so the file matters.
+LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+handlers = [logging.FileHandler(LOG_DIR / "collector.log", encoding="utf-8")]
+if sys.stderr is not None:
+    handlers.append(logging.StreamHandler())
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
+                    handlers=handlers)
 log = logging.getLogger("bikepoints")
 
 
@@ -70,9 +80,13 @@ def load(docks: list[dict], conn: psycopg.Connection) -> datetime:
 
 
 def main() -> None:
-    docks = fetch()
-    with psycopg.connect(warehouse_dsn()) as conn:
-        pulled_at = load(docks, conn)
+    try:
+        docks = fetch()
+        with psycopg.connect(warehouse_dsn()) as conn:
+            pulled_at = load(docks, conn)
+    except Exception:
+        log.exception("Collector run failed")  # full error goes into the log file
+        raise
     log.info("Saved %s docks at %s", len(docks), pulled_at.isoformat(timespec="seconds"))
 
 
