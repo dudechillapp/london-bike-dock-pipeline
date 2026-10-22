@@ -1,0 +1,13 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Secrets: never commit
+.env
+
+# Airflow and local data
+logs/
+data/
+*.pbix.bak
