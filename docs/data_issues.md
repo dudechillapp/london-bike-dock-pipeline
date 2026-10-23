@@ -5,8 +5,37 @@ Newest first. Each issue keeps the query I used, so anyone can check it again.
 
 | # | Found | Issue | Status |
 | --- | --- | --- | --- |
+| 3 | 23 Oct 2026 | Collector down for about 17 hours | Fixed |
 | 2 | 22 Oct 2026 | Stray spaces in dock names | Fix planned |
 | 1 | 22 Oct 2026 | Bikes + empty docks don't add up to total docks | Cause likely found, confirming with 24 h of data |
+
+---
+
+## 3. Collector down for about 17 hours
+
+**What I saw**
+`logs/collector.log` showed only 5 scheduled pulls on 22 Oct, from 16:53 to 17:50 (Düsseldorf time). After that:
+- 17:50–19:55: no runs at all, because my PC was asleep.
+- 19:55–21:54 and 10:24–10:39 the next morning: 11 runs, all failing with `psycopg.errors.ConnectionTimeout` on port 5432.
+- Overnight: no runs, because the PC was off.
+
+**Cause**
+The scheduled task kept running, but Docker Desktop wasn't. It doesn't start by itself after a restart, so the warehouse was down and every run timed out.
+
+**Why it matters**
+- No dock data for about 17 hours, and nothing told me. I only found out by reading the log the next day.
+- A dashboard or forecast built on this data would have quietly used stale numbers.
+
+**What I did**
+- Turned on "Start Docker Desktop when you sign in". The warehouse container already restarts with Docker (`restart: unless-stopped`).
+- Set a collection window: weekdays 07:30–11:30 Düsseldorf time at minimum, which covers the 07:00–10:00 London rush in the project brief. Overnight data isn't needed for the question.
+- Downstream SQL ignores gaps longer than 1 hour, so a missed slot can't be counted as hours of empty docks.
+
+**What I'll add**
+- A freshness test in Step 6: fail and alert if the newest `pulled_at` is more than 20 minutes old during the collection window. With that, this outage would have been caught after 20 minutes instead of 17 hours.
+
+**Lesson**
+"The job ran" and "the data arrived" are different things. Monitor the data, not just the job.
 
 ---
 

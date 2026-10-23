@@ -9,8 +9,10 @@ spring and autumn never creates a duplicate or a missing hour.
 
 Run from the project folder:
     python -m src.extract.weather
+    python -m src.extract.weather --start 2025-06-01   # also fill in older history
 """
 
+import argparse
 import json
 import logging
 import os
@@ -79,9 +81,28 @@ def save(conn, source: str, start: date, end: date, payload: dict) -> None:
 
 
 def main() -> None:
+    p = argparse.ArgumentParser()
+    p.add_argument("--start", type=date.fromisoformat,
+                   help="also backfill archive history from this date (YYYY-MM-DD)")
+    args = p.parse_args()
+
     today = datetime.now(timezone.utc).date()
     try:
         with psycopg.connect(warehouse_dsn()) as conn:
+            # 0. Optional: older history, up to the day before the earliest archive already loaded
+            if args.start:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT min(start_date) FROM raw.weather_response WHERE source = 'archive'")
+                    first = cur.fetchone()[0]
+                old_end = (first - timedelta(days=1)) if first else today - timedelta(days=ARCHIVE_DELAY_DAYS)
+                if args.start <= old_end:
+                    data = get(ARCHIVE_URL, {**LONDON, "hourly": HOURLY, "timezone": "GMT",
+                                             "start_date": args.start.isoformat(),
+                                             "end_date": old_end.isoformat()})
+                    save(conn, "archive", args.start, old_end, data)
+                else:
+                    log.info("Archive already starts on or before %s", args.start)
+
             # 1. Archive: from the day after the last archive pull (or a year ago) up to 6 days ago
             with conn.cursor() as cur:
                 cur.execute("SELECT max(end_date) FROM raw.weather_response WHERE source = 'archive'")
