@@ -18,8 +18,8 @@ WHERE s.pulled_at > COALESCE((SELECT max(pulled_at) FROM staging.dock_status),
                              '-infinity'::timestamptz);
 
 -- 2. Dock dimension: add new docks, update names and locations that changed
-INSERT INTO staging.dock (dock_id, name, lat, lon, first_seen, last_seen)
-SELECT dock_id, name, lat, lon, first_seen, last_seen
+INSERT INTO staging.dock (dock_id, name, lat, lon, first_seen, last_seen, terminal_name)
+SELECT dock_id, name, lat, lon, first_seen, last_seen, terminal_name
 FROM (
     SELECT dock->>'id'                       AS dock_id,
            dock->>'commonName'               AS name,
@@ -27,6 +27,8 @@ FROM (
            (dock->>'lon')::numeric(9,6)      AS lon,
            min(pulled_at) OVER w             AS first_seen,
            max(pulled_at) OVER w             AS last_seen,
+           (SELECT p->>'value' FROM jsonb_array_elements(dock->'additionalProperties') p
+            WHERE p->>'key' = 'TerminalName')  AS terminal_name,
            ROW_NUMBER() OVER (PARTITION BY dock->>'id' ORDER BY pulled_at DESC) AS rn
     FROM new_docks
     WINDOW w AS (PARTITION BY dock->>'id')
@@ -36,6 +38,7 @@ ON CONFLICT (dock_id) DO UPDATE
 SET name       = EXCLUDED.name,
     lat        = EXCLUDED.lat,
     lon        = EXCLUDED.lon,
+    terminal_name = EXCLUDED.terminal_name,
     first_seen = LEAST(staging.dock.first_seen, EXCLUDED.first_seen),
     last_seen  = GREATEST(staging.dock.last_seen, EXCLUDED.last_seen);
 
