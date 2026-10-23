@@ -93,6 +93,21 @@ CHECKS = {
                                 NOT BETWEEN f.period_start AND f.period_end) > 0
         ORDER BY 2
     """,
+    "12. How journeys were matched to docks (start and end)": """
+        SELECT 'start' AS side, start_match AS match, count(*) AS journeys,
+               round(100.0 * count(*) / sum(count(*)) OVER (), 2) AS pct
+        FROM staging.journeys GROUP BY 1, 2
+        UNION ALL
+        SELECT 'end', end_match, count(*), round(100.0 * count(*) / sum(count(*)) OVER (), 2)
+        FROM staging.journeys GROUP BY 1, 2
+        ORDER BY 1, 3 DESC
+    """,
+    "13. Valid trips (1 minute to 1 day, ends after it starts)": """
+        SELECT is_valid_trip, count(*) AS journeys,
+               round(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_s)::numeric / 60, 1) AS median_minutes,
+               round(avg(duration_s) / 60, 1) AS avg_minutes
+        FROM staging.journeys GROUP BY 1 ORDER BY 1
+    """,
     "11. Hires per month (UTC)": """
         SELECT date_trunc('month', start_time)::date AS month, count(*) AS hires,
                round(avg(duration_s) / 60, 1) AS avg_minutes

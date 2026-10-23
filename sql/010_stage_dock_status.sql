@@ -22,7 +22,7 @@ INSERT INTO staging.dock (dock_id, name, lat, lon, first_seen, last_seen, termin
 SELECT dock_id, name, lat, lon, first_seen, last_seen, terminal_name
 FROM (
     SELECT dock->>'id'                       AS dock_id,
-           dock->>'commonName'               AS name,
+           staging.clean_name(dock->>'commonName') AS name,
            (dock->>'lat')::numeric(9,6)      AS lat,
            (dock->>'lon')::numeric(9,6)      AS lon,
            min(pulled_at) OVER w             AS first_seen,

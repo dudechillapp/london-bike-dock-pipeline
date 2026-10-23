@@ -13,8 +13,8 @@ WHERE file_name NOT IN (SELECT file_name FROM staging.journey_file_staged);
 -- Terminal number without leading zeros -> dock, for matching
 CREATE TEMP TABLE dock_lookup ON COMMIT DROP AS
 SELECT dock_id,
-       ltrim(terminal_name, '0')                    AS terminal_key,
-       ltrim(replace(dock_id, 'BikePoints_', ''), '0') AS bikepoint_key
+       ltrim(terminal_name, '0')        AS terminal_key,
+       lower(staging.clean_name(name))  AS name_key
 FROM staging.dock;
 
 WITH parsed AS (
@@ -35,8 +35,8 @@ WITH parsed AS (
                 WHEN j.duration_s  ~ '^\d+$' THEN j.duration_s::numeric
            END AS duration_s,
            j.start_station_id, j.end_station_id,
-           trim(j.start_station_name) AS start_station_name,
-           trim(j.end_station_name)   AS end_station_name,
+           staging.clean_name(j.start_station_name) AS start_station_name,
+           staging.clean_name(j.end_station_name)   AS end_station_name,
            j.bike_id, j.bike_model
     FROM raw.journeys j
     JOIN files_to_stage f ON f.file_name = j.source_file
@@ -44,20 +44,27 @@ WITH parsed AS (
 ins AS (
 INSERT INTO staging.journeys (rental_id, start_time, end_time, duration_s,
                               start_station_id, end_station_id, start_dock_id, end_dock_id,
+                              start_match, end_match,
                               start_station_name, end_station_name, bike_id, bike_model, source_file)
 SELECT p.rental_id,
        p.start_local AT TIME ZONE 'Europe/London',   -- London local time -> UTC
        p.end_local   AT TIME ZONE 'Europe/London',
        p.duration_s,
        p.start_station_id, p.end_station_id,
-       COALESCE(st.dock_id, sb.dock_id),
-       COALESCE(et.dock_id, eb.dock_id),
+       -- Issue 4: a terminal number only counts if the name agrees too,
+       -- because TfL has reused some numbers for docks elsewhere in London
+       CASE WHEN st.name_key = lower(p.start_station_name) THEN st.dock_id END,
+       CASE WHEN et.name_key = lower(p.end_station_name)   THEN et.dock_id END,
+       CASE WHEN st.dock_id IS NULL THEN 'no_dock'
+            WHEN st.name_key = lower(p.start_station_name) THEN 'matched'
+            ELSE 'name_mismatch' END,
+       CASE WHEN et.dock_id IS NULL THEN 'no_dock'
+            WHEN et.name_key = lower(p.end_station_name) THEN 'matched'
+            ELSE 'name_mismatch' END,
        p.start_station_name, p.end_station_name, p.bike_id, p.bike_model, p.source_file
 FROM parsed p
-LEFT JOIN dock_lookup st ON st.terminal_key  = ltrim(p.start_station_id, '0')
-LEFT JOIN dock_lookup sb ON sb.bikepoint_key = ltrim(p.start_station_id, '0') AND st.dock_id IS NULL
-LEFT JOIN dock_lookup et ON et.terminal_key  = ltrim(p.end_station_id, '0')
-LEFT JOIN dock_lookup eb ON eb.bikepoint_key = ltrim(p.end_station_id, '0') AND et.dock_id IS NULL
+LEFT JOIN dock_lookup st ON st.terminal_key = ltrim(p.start_station_id, '0')
+LEFT JOIN dock_lookup et ON et.terminal_key = ltrim(p.end_station_id, '0')
 WHERE p.rental_id IS NOT NULL
   AND p.start_local IS NOT NULL
 ON CONFLICT (rental_id, start_time) DO NOTHING

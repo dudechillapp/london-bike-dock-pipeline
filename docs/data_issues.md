@@ -5,9 +5,62 @@ Newest first. Each issue keeps the query I used, so anyone can check it again.
 
 | # | Found | Issue | Status |
 | --- | --- | --- | --- |
+| 5 | 23 Oct 2026 | Unrealistic hire durations | Fixed: `is_valid_trip` flag |
+| 4 | 23 Oct 2026 | Terminal numbers reused for docks elsewhere | Fixed: match on number and name |
 | 3 | 23 Oct 2026 | Collector down for about 17 hours | Fixed |
-| 2 | 22 Oct 2026 | Stray spaces in dock names | Fix planned |
+| 2 | 22 Oct 2026 | Stray spaces in dock names | Fixed: `staging.clean_name()` |
 | 1 | 22 Oct 2026 | Bikes + empty docks don't add up to total docks | Cause likely found, confirming with 24 h of data |
+
+---
+
+## 5. Unrealistic hire durations
+
+**What I saw** (`python -m src.checks.journeys_check`, 9,093,044 hires, Jun 2025 to May 2026)
+- 71,463 hires under 1 minute.
+- 5,857 hires over 1 day.
+- 66 hires that end before they start, and 184 with no duration.
+- The average hire in June 2025 came out at 47.7 minutes, while the median over the whole year is 13.3 minutes.
+
+**Likely cause**
+- Under 1 minute: a bike taken out and docked again straight away, for example because it was faulty or the rider changed their mind.
+- Over 1 day: bikes not docked properly, lost, or recovered later.
+- Ending before starting: most likely clock or recording errors. Too few to matter, but impossible, so they can't count.
+
+**Why it matters**
+- These aren't real trips, so they would inflate demand counts slightly and distort average durations a lot.
+- A forecast trained on them would learn noise.
+
+**What I did**
+- Added `is_valid_trip` to `staging.journeys`: true when a hire lasts 1 minute to 1 day and ends after it starts. Demand analysis uses valid trips only.
+- Kept every row. Nothing is deleted, so the rule can be changed later.
+- Report medians, not averages, for durations.
+
+---
+
+## 4. Terminal numbers reused for docks elsewhere
+
+**What I saw**
+Journey files identify stations by TfL's terminal number (for example `001058`), not the `BikePoints_` id the live API uses. 799 station ids matched a live terminal number and none matched a BikePoints number. But for 3 of them the names didn't agree:
+
+| Terminal | Name in journey files | Name in live API | Journeys |
+| --- | --- | --- | --- |
+| 002681 | Harriet Street, Knightsbridge | Lowndes Square, Knightsbridge | 10,477 |
+| 001058 | Edgware Road Station, Marylebone | Orchard Place, Blackwall Tunnel | 6,150 |
+| 002639 | King Edward Walk, Waterloo | Brockwell Lido, Brixton | 2,910 |
+
+**Likely cause**
+TfL reuses a terminal number when a dock closes and a new one opens, sometimes on the other side of London.
+
+**Why it matters**
+Matching on the number alone would place about 19,500 journeys at the wrong dock, miles from where they started. A forecast for Orchard Place would include Edgware Road's demand.
+
+**What I did**
+- A journey only links to a dock when the terminal number **and** the cleaned name agree.
+- New columns `start_match` and `end_match` record the outcome: `matched`, `name_mismatch` or `no_dock`, so the rule is visible rather than hidden.
+- 17 station ids have no live dock at all, mostly closed or moved docks marked `_OLD` (for example `London Fields, Hackney Central_OLD`). They stay unmatched.
+
+**Lesson**
+An id that matches isn't proof that it's the same thing. Check a second attribute before trusting a join.
 
 ---
 
@@ -51,7 +104,10 @@ Names are typed in by hand in TfL's system and come through the API exactly as e
 - Searches and joins on the name can miss a dock: `Dunston Road, Haggerston` won't match.
 - The AI agent in Step 8 searches docks by name (for example "docks near Waterloo"), so messy names mean missed answers.
 
-**What I'll do**
+**What I did (23 Oct 2026)**
+Added `staging.clean_name()`, used for dock names and journey station names. Raw names stay untouched.
+
+**Original plan**
 - Keep the raw name untouched in `raw`, as with all raw data.
 - In staging, clean it: trim spaces at the ends, remove a space before a comma, and collapse double spaces.
 - Join on `dock_id` everywhere, never on the name.
