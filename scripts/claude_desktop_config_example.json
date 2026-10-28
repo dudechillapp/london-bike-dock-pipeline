@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "london-bike-docks": {
+      "command": "C:\\Users\\Chris\\Projects\\london-bike-dock-pipeline\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\Users\\Chris\\Projects\\london-bike-dock-pipeline\\src\\agent\\server.py"]
+    }
+  }
+}

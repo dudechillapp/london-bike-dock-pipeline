@@ -93,7 +93,7 @@ Numbers in the forecast columns are MAE (Mean Absolute Error): the average numbe
 ![The model follows the daily pattern; single hours stay noisy](img/forecast_week.png)
 
 ### Recommendation
-- **Plan vans by area, the evening before:** forecast each area's morning-rush demand. In Waterloo, the busiest area, May averaged 373 morning-rush hires a day, forecast at 348, with an average miss of 54 (14%).
+- **Plan vans by area, the evening before:** forecast each area's morning-rush demand. The gain varies by area: in Waterloo, the busiest, May averaged 373 morning-rush hires a day and the model missed by 54 on average (14%), barely better than "same days last week" (55). Across all areas together it's 31% better.
 - **Share bikes out within an area using each dock's usual pattern.** It's simple, explainable and nearly as accurate as a model at dock level.
 
 ### How I built it

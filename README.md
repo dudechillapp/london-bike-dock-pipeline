@@ -20,6 +20,20 @@ A day-ahead forecast of each area's working-day morning rush (07:00–09:59) is 
 
 Full write-up with methods and limits: [docs/findings.md](docs/findings.md)
 
+## Ask the data: an AI agent over the warehouse
+
+An MCP (Model Context Protocol) server ([src/agent/server.py](src/agent/server.py)) lets Claude answer questions from the warehouse, such as *"Which areas are busiest in the morning rush, and how accurate is the forecast for Waterloo?"*
+
+![Claude answering a question from the warehouse](docs/img/agent_answer.png)
+
+How it's kept safe and trustworthy:
+- **Read-only:** the agent logs in as `agent_reader`, which can only read the `marts` schema, can never write, and has a 15-second query limit ([sql/070_agent_layer.sql](sql/070_agent_layer.sql)).
+- **Narrow tools, not free SQL:** 7 tools with clear descriptions, such as `busiest_areas`, `dock_status_now` and `forecast_accuracy`, each running a fixed, tested query.
+- **One definition per metric:** a `metric_catalog` table, so the agent quotes the same definitions as the docs.
+- **Freshness on every answer:** each tool returns its period or `as_of` time, so stale live data is visible.
+
+To connect it to the Claude desktop app, add the block in [scripts/claude_desktop_config_example.json](scripts/claude_desktop_config_example.json) to Claude's config (Settings → Developer → Edit Config), then restart Claude.
+
 ## Architecture
 
 ```mermaid
@@ -35,6 +49,7 @@ flowchart LR
     T[tests/<br/>8 data quality checks] -.-> S
     M --> N[Notebooks and charts]
     M --> F[Forecast model]
+    M --> G[MCP server<br/>read-only tools for Claude]
 ```
 
 - **raw** keeps every response exactly as received, so anything downstream can be rebuilt.
@@ -51,6 +66,7 @@ flowchart LR
 | Orchestrate | Airflow DAGs every 15 minutes, daily and weekly, with retries and phone alerts on failure ([dags](dags)) |
 | Data quality | 8 automated SQL tests: freshness, volume, validity, schema and match rate ([tests](tests)) |
 | Analysis | A like-for-like rain comparison, and a forecast tested on an unseen month against 4 baselines ([src/analysis](src/analysis)) |
+| AI agent layer | MCP server with 7 read-only tools, a read-only database role and a metric catalog ([src/agent](src/agent)) |
 | Documentation | Project brief, data issues log and findings ([docs](docs)) |
 
 ## Data issues I found and fixed
@@ -70,7 +86,7 @@ Requires Docker Desktop and Python 3.13 on Windows.
 ```powershell
 git clone https://github.com/dudechillapp/london-bike-dock-pipeline.git
 cd london-bike-dock-pipeline
-copy .env.example .env                  # then set DB_PASSWORD, and the same password in WAREHOUSE_URL
+copy .env.example .env                  # then set DB_PASSWORD and AGENT_DB_PASSWORD, and the same passwords in the URLs
 
 py -3.13 -m venv .venv
 .venv\Scripts\activate
@@ -83,7 +99,7 @@ docker logs bikes-airflow 2>&1 | Select-String "password"   # login for user adm
 
 ## Stack
 
-Python 3.13 · SQL · TimescaleDB (PostgreSQL 16) · Apache Airflow 2.10 · Docker · pandas · scikit-learn · matplotlib
+Python 3.13 · SQL · TimescaleDB (PostgreSQL 16) · Apache Airflow 2.10 · Docker · pandas · scikit-learn · matplotlib · MCP
 
 ## Data sources
 
@@ -92,6 +108,6 @@ Python 3.13 · SQL · TimescaleDB (PostgreSQL 16) · Apache Airflow 2.10 · Dock
 
 ## Next
 
-- An **MCP (Model Context Protocol) server**, so an AI agent can answer questions such as "Which areas will be busiest tomorrow morning?" from the marts, with read-only access.
+- A **retrieval tool** for the agent: embed `docs/` (findings, data issues) with pgvector, so it can also answer "why" questions such as "Why are some docks missing data?".
 - **Empty-dock minutes** per dock from the live collector, once it has a few weeks of weekday mornings.
 - Weather **forecasts** instead of actual weather as model inputs, for a true day-ahead forecast.
