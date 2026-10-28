@@ -14,5 +14,32 @@ services:
       interval: 10s
       retries: 5
 
+  # Airflow in "standalone" mode: scheduler, web UI and its own small metadata
+  # database in one container. Fine for one person; a team would split these up.
+  airflow:
+    image: apache/airflow:2.10.5-python3.12
+    container_name: bikes-airflow
+    command: standalone
+    depends_on:
+      warehouse:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/project/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: Europe/London
+      AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: Europe/London
+      PYTHONPATH: /opt/project
+      # Inside Docker the warehouse is reached by its service name, not localhost
+      WAREHOUSE_URL: postgresql+psycopg://bikes:${DB_PASSWORD}@warehouse:5432/bikes
+      TFL_APP_KEY: ${TFL_APP_KEY:-}
+      ALERT_NTFY_TOPIC: ${ALERT_NTFY_TOPIC:-}
+      _PIP_ADDITIONAL_REQUIREMENTS: "psycopg[binary]==3.3.6 python-dotenv==1.2.4"
+    ports: ["8080:8080"]
+    volumes:
+      - .:/opt/project
+      - airflow_home:/opt/airflow
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  airflow_home:

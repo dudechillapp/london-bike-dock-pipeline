@@ -1,7 +1,8 @@
 -- 040_marts_hires_weather.sql
 -- marts.hires_weather: one row per hour with valid hires and the weather in that hour.
 -- Hours with no hires are kept as 0, not left out, so averages are honest.
--- Rebuild with: REFRESH MATERIALIZED VIEW marts.hires_weather;
+-- Refresh with sql/060_refresh_marts.sql. Rerunning this file fails once
+-- marts.dock_hourly_hires (050) exists, because that view is built on this one.
 
 DROP MATERIALIZED VIEW IF EXISTS marts.hires_weather;
 
