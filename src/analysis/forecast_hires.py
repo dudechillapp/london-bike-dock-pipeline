@@ -27,6 +27,10 @@ TEST_START = pd.Timestamp("2026-05-01")          # London time
 FEATURES = ["hour_of_day", "day_of_week", "is_working_day", "month_num",
             "temperature_c", "precipitation_mm", "wind_speed_kmh",
             "hires_lag_1h", "hires_lag_24h", "hires_lag_168h", "dock_hour_mean"]
+# Day-ahead model: what a van team could know the evening before, so no "previous hour".
+# (It still uses the actual weather; in real use that would be tomorrow's weather forecast.)
+FEATURES_DAY_AHEAD = [f for f in FEATURES if f != "hires_lag_1h"]
+
 
 
 def load() -> pd.DataFrame:
@@ -56,7 +60,7 @@ def load() -> pd.DataFrame:
 def mae_table(name_to_pred: dict, actual: pd.Series) -> pd.DataFrame:
     rows = [(n, mean_absolute_error(actual, p)) for n, p in name_to_pred.items()]
     out = pd.DataFrame(rows, columns=["forecast", "mae"])
-    best_baseline = out[out.forecast != "Model"].mae.min()
+    best_baseline = out[~out.forecast.str.startswith("Model")].mae.min()
     out["vs_best_baseline"] = (1 - out.mae / best_baseline).map(lambda v: f"{v:+.1%}")
     out["mae"] = out.mae.round(3)
     return out
@@ -86,7 +90,11 @@ def main() -> None:
                                           max_leaf_nodes=63, random_state=42)
     model.fit(train[FEATURES], train.hires)
     test["predicted"] = model.predict(test[FEATURES]).astype("float32")
-    say(f"Model trained in {time.time() - t0:.0f}s total")
+    day_model = HistGradientBoostingRegressor(loss="poisson", max_iter=300, learning_rate=0.1,
+                                              max_leaf_nodes=63, random_state=42)
+    day_model.fit(train[FEATURES_DAY_AHEAD], train.hires)
+    test["predicted_day_ahead"] = day_model.predict(test[FEATURES_DAY_AHEAD]).astype("float32")
+    say(f"Models trained in {time.time() - t0:.0f}s total")
 
     preds = {
         "Same hour last week": test.hires_lag_168h,
@@ -94,6 +102,7 @@ def main() -> None:
         "Previous hour": test.hires_lag_1h,
         "Dock's usual level for this hour": test.dock_hour_mean,
         "Model": test.predicted,
+        "Model (day ahead, no previous hour)": test.predicted_day_ahead,
     }
 
     say("\n## 1. All dock-hours in May 2026")
@@ -124,19 +133,24 @@ def main() -> None:
         say(f"{FEATURES[i]:<18} {imp.importances_mean[i]:.4f}")
 
     # Save May predictions for the dashboard and the agent
-    out = test[["dock_id", "hour", "hires", "predicted", "hires_lag_168h"]].rename(
-        columns={"hires": "actual", "hires_lag_168h": "baseline_last_week"})
+    out = test[["dock_id", "hour", "hires", "predicted", "predicted_day_ahead",
+                "hires_lag_168h", "dock_hour_mean"]].rename(
+        columns={"hires": "actual", "hires_lag_168h": "baseline_last_week",
+                 "dock_hour_mean": "baseline_usual"})
     with psycopg.connect(DSN) as conn, conn.cursor() as cur:
-        cur.execute("""CREATE TABLE IF NOT EXISTS marts.hire_forecast (
-                           dock_id text, hour timestamptz, actual int, predicted real,
-                           baseline_last_week int, PRIMARY KEY (dock_id, hour))""")
+        cur.execute("DROP TABLE IF EXISTS marts.hire_forecast")
+        cur.execute("""CREATE TABLE marts.hire_forecast (
+                           dock_id text, hour timestamptz, actual int,
+                           predicted real, predicted_day_ahead real,
+                           baseline_last_week int, baseline_usual real,
+                           PRIMARY KEY (dock_id, hour))""")
         cur.execute("COMMENT ON TABLE marts.hire_forecast IS 'Test-period (May 2026) hourly hire "
                     "forecasts per dock from src/analysis/forecast_hires.py, next to the actual hires.'")
-        cur.execute("TRUNCATE marts.hire_forecast")
         with cur.copy("COPY marts.hire_forecast FROM STDIN") as copy:
             for r in out.itertuples(index=False):   # plain Python types for psycopg
                 copy.write_row((r.dock_id, r.hour, int(r.actual), float(r.predicted),
-                                int(r.baseline_last_week)))
+                                float(r.predicted_day_ahead), int(r.baseline_last_week),
+                                float(r.baseline_usual)))
         conn.commit()
     say(f"\nSaved {len(out):,} predictions to marts.hire_forecast in {time.time() - t0:.0f}s total")
 

@@ -3,6 +3,11 @@
 What the data shows so far, with the evidence behind each result.
 Data: 9,015,474 valid Santander Cycles hires (June 2025 to May 2026) joined to hourly London weather.
 
+| # | Finding |
+| --- | --- |
+| 1 | Rain cuts hires by about 28%, and heavier rain cuts more |
+| 2 | A day-ahead forecast of morning demand per area is 31% more accurate than simple guesses; single dock-hours are mostly chance |
+
 ---
 
 ## Finding 1: Rain cuts hires by about 28%, and heavier rain cuts more
@@ -62,4 +67,47 @@ This data has no prices, so it can't show whether a discount would actually brin
 
 ---
 
-_Reproduce: `python -m src.analysis.rain_effect` (numbers) and `python -m src.analysis.rain_charts` (charts)._
+## Finding 2: Hires can be forecast well for an area, not for a single dock-hour
+
+**A day-ahead forecast of the working-day morning rush (07:00–09:59) is off by 12% per area, against 18% for the simple guesses, a 31% improvement. For a single dock in a single hour, nothing does much better than the dock's usual pattern.**
+
+![Planning by area cuts the error from 45% to 12%](img/forecast_levels.png)
+
+Tested on May 2026, a month the model never saw while training (June 2025 to April 2026).
+
+| Level | Average hires | Same days last week | Dock's usual level | Model (day ahead) | Model vs best simple guess |
+| --- | --- | --- | --- | --- | --- |
+| One dock, one hour (all hours) | 1.45 | 1.19 | 0.92 | 0.92 | +0.2% |
+| One dock, one hour (morning rush) | 3.05 | 1.79 | 1.44 | 1.39 | +3.5% |
+| One dock, whole morning rush | 9.2 | 3.33 | 2.76 | **2.50** | **+9.4%** |
+| One area, whole morning rush | 58.7 | 10.55 | 10.47 | **7.18** | **+31.4%** |
+
+Numbers in the forecast columns are MAE (Mean Absolute Error): the average number of hires the forecast is off by. Lower is better.
+
+### What it means
+1. **A single dock-hour is mostly chance.** A dock averages 1.45 hires an hour and 48% of dock-hours have none. Even a perfect estimate of the rate would still be off by about 0.74 hires on average (0.92 for the model), just because riders turn up at random.
+2. **The dock's usual pattern does most of the work.** It is 23% more accurate than "same hour last week", the obvious guess. The model adds only 0.2–3.5% at this level.
+3. **Adding up hours and docks is where the model earns its place.** Chance variation cancels out in totals, while the things the model knows about (season, weather, bank holidays, recent demand) don't. At area level it beats the simple guesses by 31%.
+4. **Last week is a bad guide after a bank holiday.** In the chart below, "same hour last week" shoots up on Monday 11 May, copying the leisure rush of the Early May bank holiday on 4 May. The model knows it's a normal working day.
+
+![The model follows the daily pattern; single hours stay noisy](img/forecast_week.png)
+
+### Recommendation
+- **Plan vans by area, the evening before:** forecast each area's morning-rush demand. In Waterloo, the busiest area, May averaged 373 morning-rush hires a day, forecast at 348, with an average miss of 54 (14%).
+- **Share bikes out within an area using each dock's usual pattern.** It's simple, explainable and nearly as accurate as a model at dock level.
+
+### How I built it
+- `marts.dock_hourly_hires`: one row per dock per hour (about 6.8 million), including hours with 0 hires, with lagged hires from `LAG()` window functions.
+- A gradient boosting model for counts (scikit-learn `HistGradientBoostingRegressor`, Poisson loss), using the hour, day, bank holidays, weather, recent hires and each dock's usual level. The dock's usual level is learned from training months only, so nothing leaks from May.
+- Areas are the part of each dock name after the last comma, for example "Waterloo": 124 areas.
+
+### Limits
+- **The weather inputs are the actual weather.** In real use the model would get tomorrow's weather forecast, so real errors would be a little higher.
+- **One test month.** May has two bank holidays and long, light evenings; a winter month could look different.
+- **Hires aren't empty docks.** This forecasts demand. Whether a dock actually runs empty also depends on returns and van moves, which the live collector covers.
+- **The model predicts averages, while MAE rewards the most likely value.** Part of the gap to the "perfect rate" figure (0.92 against 0.74) comes from that, not just from missing information.
+
+---
+
+_Reproduce Finding 1: `python -m src.analysis.rain_effect` and `python -m src.analysis.rain_charts`._
+_Reproduce Finding 2: `python -m src.analysis.forecast_hires`, then `python -m src.analysis.forecast_windows` and `python -m src.analysis.forecast_charts`._
